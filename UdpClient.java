@@ -1,13 +1,22 @@
+/**
+ * Author: Colin Koo
+ * Professor: Davarpanah
+ * Program: Implement UDP packet.
+ * Source: http://www.roman10.net/2011/11/27/how-to-calculate-iptcpudp-checksumpart-1-theory/
+ */
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.Socket;
 import java.util.Random;
-import java.io.InputStreamReader;
-import java.io.BufferedReader;
 
 public class UdpClient {
+	/**
+	 * The main method connects to a designated server through a socket and writes IPv4 and UDP
+	 * packets with the correct header to the server, receiving a response in return and calculating the RTT. 
+	 * @param args
+	 */
 	public static void main(String[] args) {
 		try (Socket socket = new Socket("codebank.xyz", 38005)){
 			InputStream is = socket.getInputStream();
@@ -15,27 +24,45 @@ public class UdpClient {
 			PrintStream ps = new PrintStream(os);
 
 			byte[] deadbeef = {(byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF};
-			ps.write(getIPV4Header(4, deadbeef));
-			handshake(is);
-			byte[] port = getPort(is);
-			byte[] data;
-			byte[] udp;
+			ps.write(getIPV4Header(4, deadbeef));	//Hardcoded 4 bytes for server handshake.
+			System.out.print("Handshake response: ");
+			serverResponse(is);
+			
+			byte[] port = getPort(is), data;
+			double sent = 0, arrival = 0, avg = 0, elapsed = 0;
+			long portNum = (short) (((((short) port[0]) << 8) & 0xFF00) | port[1]);
+			System.out.println("Port number received: " + portNum);
 			int size = 1;
 			
 			for (int i = 0; i < 12; ++i){
 			size <<= 1;
-				data = getData(size);		//(size) bytes of random data
+				data = getData(size);		//Random data in an int (size) byte array
 				System.out.println("Data length: " + size);
-				udp = UdpHeader(port, data);
-				ps.write(getIPV4Header(8+size, udp));//, UdpHeader(size, port, data)));	//getData(size))));
-				handshake(is);
+				
+				ps.write(getIPV4Header(size+8, UdpHeader(port, data)));
+				sent = System.currentTimeMillis();
+				System.out.print("Response: ");
+				serverResponse(is);
+				
+				arrival = System.currentTimeMillis();
+				elapsed = arrival - sent;
+				System.out.println("RTT: " + elapsed + "ms\n");
+				avg += elapsed;
 			}
+			System.out.println("Average RTT: " + (avg/12) + "ms");
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}	
+	/**
+	 * This method is the same method as from the IPv4 program, with differences in the protocol and data fields, which are based off
+	 * the UDP header.
+	 * @param size
+	 * @param data
+	 * @return
+	 */
 	public static byte[] getIPV4Header(int size, byte[] data){
-		short length = (short) (20+size);
+		short length = (short) (20+size);//20 bytes from IPv4 header, 8 bytes from UDP header, and int (size) from the desired data size.
 		byte[] arr = new byte[length];
 		
 		arr[0] = 0x45; 	//Version, HLen
@@ -63,16 +90,23 @@ public class UdpClient {
 		arr[18] = (byte) 88;
 		arr[19] = (byte) 154;
 
-		short cksum = checksum(arr);
+		short cksum = checksum(arr);	//Checksum doesnt include data.
 		arr[10] = (byte) ((cksum >> 8) & 0xFF);
 		arr[11] = (byte) (cksum & 0xFF);
 		
-		// Data fields are defaulted to 0 in the instantiation of the array.
 		for (int i = 20; i < 20+data.length; ++i){
 			arr[i] = data[i-20];
 		}
 		return arr;
 	}
+	/**
+	 * The UdpHeader method takes in a parameter port and data, which are variables to construct
+	 * a UDP header.  It utilizes the psuedoheader method which uses data from the IPv4 and UDP
+	 * headers to return a checksum for the UDP header.  
+	 * @param port, port number from server
+	 * @param data, randomized data
+	 * @return byte array representing the UDP packet.
+	 */
 	public static byte[] UdpHeader(byte[] port, byte[] data){
 		//minimum size is 8, + data size
 		int length = 8 + data.length;	
@@ -84,23 +118,32 @@ public class UdpClient {
 		UDP[2] = port[0]; // dest, 2 byte
 		UDP[3] = port[1];
 		
-		UDP[4] = (byte) (length >> 8);
+		UDP[4] = (byte) (length >> 8);	//UDP Length
 		UDP[5] = (byte) length;
  		
-		UDP[6] = 0; //checksum to do
+		UDP[6] = 0; //checksum to do, includes data
 		UDP[7] = 0;
 		
-		for (int i = 8; i < length; ++i){
+		for (int i = 8; i < length; ++i){	
 			UDP[i] = data[i-8];
 		}
 		
-		short checksum = pseudoheader(length, port, data);
+		short checksum = pseudoHeader(length, port, data);
 		UDP[6] = (byte) ((checksum >> 8) & 0xFF);
 		UDP[7] = (byte) (checksum & 0xFF);
 		
 		return UDP;
 	}
-	public static short pseudoheader(int UdpLength, byte[] port, byte[] data){
+	/**
+	 * The pseudoHeader method constructs a checksum for the UDP header, using the IPv4's source address,
+	 * destination address, protocol, and one byte of padding.  It also uses all of the UDP header's fields, 
+	 * including the source port, destination port, UDP header length, and data.
+	 * @param UdpLength
+	 * @param port
+	 * @param data
+	 * @return checksum.
+	 */
+	public static short pseudoHeader(int UdpLength, byte[] port, byte[] data){
 		int length = 20 + UdpLength;
 		byte[] arr = new byte[length];
 		arr[0] = (byte) 76; 	//Src public IP Address
@@ -118,8 +161,8 @@ public class UdpClient {
 		arr[10] = (byte) (UdpLength >> 8);	//udp length
 		arr[11] = (byte) (UdpLength & 0xFF);	//udp length 2
 		
-		arr[12] = (byte) 0xff;	//src port
-		arr[13] = (byte) 0xff;
+		arr[12] = (byte) 0xFF;	//src port
+		arr[13] = (byte) 0xFF;
 		
 		arr[14] = port[0];	//dest port
 		arr[15] = port[1];
@@ -132,7 +175,11 @@ public class UdpClient {
 		}
 		return checksum(arr);
 	}
-	public static void handshake(InputStream is){
+	/**
+	 * Reads 4 bytes from the server and prints it in hex.
+	 * @param is
+	 */
+	public static void serverResponse(InputStream is){
 		try {
 			System.out.print("0x");
 			byte serverResponse = 0;
@@ -145,6 +192,11 @@ public class UdpClient {
 		}
 		System.out.println();
 	}
+	/**
+	 * Randomizes all the slots in a byte array.  
+	 * @param size of the data to be used in the UDP header
+	 * @return byte array of random data
+	 */
 	public static byte[] getData(int size){
 		Random rng = new Random();
 		byte[] data = new byte[size];
@@ -153,6 +205,12 @@ public class UdpClient {
 		}
 		return data;
 	}
+	/**
+	 * Returns the port number
+	 * @param is
+	 * @return byte array where first slot represents the first half of the port number and 
+	 * 		the second slot represents the second half.
+	 */
 	public static byte[] getPort(InputStream is){
 		byte[] port = new byte[2];
 		try {
@@ -162,10 +220,13 @@ public class UdpClient {
 		} catch (IOException e){
 			e.printStackTrace();
 		}
-//		System.out.println(Integer.toBinaryString(port & 0xFFFF));
 		return port;
 	}
-	
+	/**
+	 * This method returns a checksum for the parameter array, the same method used in a previous exercise. 
+	 * @param b- byte array.
+	 * @return checksum
+	 */
 	public static short checksum(byte[] b){
 		long concat = 0x0;
 		long sum = 0x0;
@@ -182,7 +243,7 @@ public class UdpClient {
 				sum ++;
 			}
 		}
-		short checksum = (short) (~sum);
+//		short checksum = (short) (~sum);
 //		System.out.println("Checksum calculated: 0x" + Integer.toHexString(checksum & 0xFFFF).toUpperCase());
 		return (short) (~sum);
 	}
