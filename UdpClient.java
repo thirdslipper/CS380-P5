@@ -22,14 +22,14 @@ public class UdpClient {
 			byte[] udp;
 			int size = 1;
 			
-//			for (int i = 0; i < 12; ++i){
+			for (int i = 0; i < 12; ++i){
 			size <<= 1;
 				data = getData(size);		//(size) bytes of random data
 				System.out.println("Data length: " + size);
 				udp = UdpHeader(port, data);
 				ps.write(getIPV4Header(8+size, udp));//, UdpHeader(size, port, data)));	//getData(size))));
 				handshake(is);
-//			}
+			}
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -84,8 +84,7 @@ public class UdpClient {
 		UDP[2] = port[0]; // dest, 2 byte
 		UDP[3] = port[1];
 		
-		UDP[4] = (byte) length;
-		UDP[4] <<= 8; 
+		UDP[4] = (byte) (length >> 8);
 		UDP[5] = (byte) length;
  		
 		UDP[6] = 0; //checksum to do
@@ -125,15 +124,14 @@ public class UdpClient {
 		arr[14] = port[0];	//dest port
 		arr[15] = port[1];
 		
-		arr[16] = (byte) (length >> 8); 	//length
-		arr[17] = (byte) (length & 0xFF);
+		arr[16] = (byte) (UdpLength >> 8); 	//length
+		arr[17] = (byte) (UdpLength & 0xFF);
 		
 		for (int i = 0; i < data.length; ++i){
-			arr[i+20] = data[i];
+			arr[i+18] = data[i];
 		}
 		return checksum(arr);
 	}
-	
 	public static void handshake(InputStream is){
 		try {
 			System.out.print("0x");
